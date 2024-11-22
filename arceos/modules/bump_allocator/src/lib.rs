@@ -1,7 +1,8 @@
 #![no_std]
 
+#[macro_use]
+extern crate axlog;
 use allocator::{AllocError, BaseAllocator, ByteAllocator, PageAllocator};
-use core::mem::size_of;
 
 /// Early memory allocator
 /// Use it before formal bytes-allocator and pages-allocator can work!
@@ -22,6 +23,7 @@ pub struct EarlyAllocator<const PAGE_SIZE: usize> {
     end: usize,
     b_pos: usize,
     p_pos: usize,
+    count: usize,
 }
 
 impl<const PAGE_SIZE: usize> EarlyAllocator<PAGE_SIZE> {
@@ -31,14 +33,18 @@ impl<const PAGE_SIZE: usize> EarlyAllocator<PAGE_SIZE> {
             end: 0,
             b_pos: 0,
             p_pos: 0,
+            count: 0,
         }
     }
 }
 
 impl<const PAGE_SIZE: usize> BaseAllocator for EarlyAllocator<PAGE_SIZE> {
     fn init(&mut self, start: usize, size: usize) {
+
         self.start = start;
         self.end = start + size;
+        self.p_pos = self.end;
+        self.b_pos = self.start;
     }
 
     fn add_memory(&mut self, start: usize, size: usize) -> allocator::AllocResult {
@@ -52,8 +58,9 @@ impl<const PAGE_SIZE: usize> ByteAllocator for EarlyAllocator<PAGE_SIZE> {
         layout: core::alloc::Layout,
     ) -> allocator::AllocResult<core::ptr::NonNull<u8>> {
         let ptr = (self.b_pos + layout.align() - 1) & !(layout.align() - 1);
-        if ptr + layout.size() < self.p_pos {
+        if ptr + layout.size() <= self.p_pos {
             self.b_pos = ptr + layout.size();
+            self.count += 1;
             return Ok(core::ptr::NonNull::new(ptr as *mut u8).unwrap());
         } else {
             Err(AllocError::NoMemory)
@@ -61,7 +68,10 @@ impl<const PAGE_SIZE: usize> ByteAllocator for EarlyAllocator<PAGE_SIZE> {
     }
 
     fn dealloc(&mut self, pos: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
-        self.b_pos = pos.as_ptr() as usize;
+        self.count -= 1;
+        if self.count == 0 {
+            self.b_pos = self.start;
+        }
     }
 
     fn total_bytes(&self) -> usize {
